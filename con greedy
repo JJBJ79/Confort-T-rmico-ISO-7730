@@ -1740,7 +1740,22 @@ class AgentePersonalizado(pomdp_py.Agent):
         except Exception:
             logging.exception("[ERROR] Falló actualizar_belief()")
             raise
-            
+
+    def set_state(self, nuevo_estado):
+        """
+        Reinicia el estado del agente a partir del estado térmico indicado.
+        """
+        try:
+            if not isinstance(nuevo_estado, EstadoConfortTermico):
+                raise TypeError("El nuevo estado debe ser una instancia de EstadoConfortTermico.")
+
+            nueva_particula = Particula(nuevo_estado)
+            nueva_creencia = CreenciaConfort([nueva_particula])
+            self.set_belief(nueva_creencia)
+            logging.info("[INFO] Estado del agente reiniciado correctamente con nueva creencia.")
+        except Exception:
+            logging.exception("[ERROR] No se pudo establecer el nuevo estado.")
+            raise           
 
 class ProblemaConfortTermico(pomdp_py.POMDP):
     def __init__(self, agente, entorno):
@@ -2025,8 +2040,13 @@ def comparar_planificadores(agent, planners, num_episodios=5):
         agent.planificador = planificador
         resultados[nombre] = {'pmv': [], 'acciones': []}
 
+        estado_inicial = copy.deepcopy(agent.get_current_state())
+
         for paso in range(num_episodios):
             logging.info(f"[{nombre}] Paso {paso + 1}/{num_episodios}")
+
+            # Reinicio del estado antes de planificar
+            agent.set_state(copy.deepcopy(estado_inicial))
 
             try:
                 accion = agent.plan()
@@ -2085,18 +2105,9 @@ def graficar_resultados(resultados_acumulados):
     plt.close()
     logging.info("[GRAFICO] pmv_evolucion.png generado con éxito.")
 
-def pasos_para_estabilizar(pmvs, ventana=3):
-    pmvs = [pmv for pmv in pmvs if pmv is not None and np.isfinite(pmv)]
-    if len(pmvs) < ventana:
-        return None
-    for i in range(len(pmvs) - ventana + 1):
-        if all(abs(pmv) < 0.5 for pmv in pmvs[i:i+ventana]):
-            return i
-    return None
-
 def main():
     logging.info("[INFO] Iniciando simulaciones múltiples.")
-    num_simulaciones = 5
+    num_simulaciones = 2
     resultados_acumulados = {"POUCT": [], "Greedy": []}
 
     for sim in range(num_simulaciones):
@@ -2179,7 +2190,7 @@ def main():
             else:
                 agent._belief = confort.belief_inicial
 
-        resultados = comparar_planificadores(agent, planners, num_episodios=10)
+        resultados = comparar_planificadores(agent, planners, num_episodios=50)
 
         for nombre, datos in resultados.items():
             pmvs = [pmv for pmv in datos['pmv'] if pmv is not None and np.isfinite(pmv)]
@@ -2187,9 +2198,7 @@ def main():
             media = np.mean(pmvs)
             desviacion = np.std(pmvs)
             en_confort = sum(abs(pmv) < 0.5 for pmv in pmvs)
-            paso_estable = pasos_para_estabilizar(pmvs)
             logging.info(f"[RESUMEN] {nombre}: PMV promedio={media:.2f}, desviación={desviacion:.2f}, en zona de confort={en_confort}/{len(pmvs)}")
-            logging.info(f"[ESTABILIZACIÓN] {nombre}: estabiliza en paso {paso_estable if paso_estable is not None else 'No alcanzado'}")
 
     for nombre, pmvs_raw in resultados_acumulados.items():
         pmvs = [pmv for pmv in pmvs_raw if pmv is not None and np.isfinite(pmv)]
