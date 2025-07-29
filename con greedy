@@ -1742,13 +1742,9 @@ class AgentePersonalizado(pomdp_py.Agent):
             raise
 
     def set_state(self, nuevo_estado):
-        """
-        Reinicia el estado del agente a partir del estado térmico indicado.
-        """
         try:
             if not isinstance(nuevo_estado, EstadoConfortTermico):
                 raise TypeError("El nuevo estado debe ser una instancia de EstadoConfortTermico.")
-
             nueva_particula = Particula(nuevo_estado)
             nueva_creencia = CreenciaConfort([nueva_particula])
             self.set_belief(nueva_creencia)
@@ -2038,15 +2034,17 @@ def comparar_planificadores(agent, planners, num_episodios=5):
     for nombre, planificador in planners.items():
         logging.info(f"\n[COMPARACIÓN] Ejecutando planificador: {nombre}")
         agent.planificador = planificador
-        resultados[nombre] = {'pmv': [], 'acciones': []}
-
-        estado_inicial = copy.deepcopy(agent.get_current_state())
+        resultados[nombre] = {'pmv': [], 'acciones': [], 'estados_iniciales': []}
 
         for paso in range(num_episodios):
             logging.info(f"[{nombre}] Paso {paso + 1}/{num_episodios}")
 
-            # Reinicio del estado antes de planificar
-            agent.set_state(copy.deepcopy(estado_inicial))
+            estado_nuevo = EstadoConfortTermico.generar_estado_aleatorio()
+            agent.set_state(estado_nuevo)
+            resultados[nombre]['estados_iniciales'].append(estado_nuevo)
+
+            particulas = [Particula(EstadoConfortTermico.generar_estado_aleatorio()) for _ in range(100)]
+            agent.set_belief(CreenciaConfort(particulas))
 
             try:
                 accion = agent.plan()
@@ -2107,7 +2105,7 @@ def graficar_resultados(resultados_acumulados):
 
 def main():
     logging.info("[INFO] Iniciando simulaciones múltiples.")
-    num_simulaciones = 2
+    num_simulaciones = 1
     resultados_acumulados = {"POUCT": [], "Greedy": []}
 
     for sim in range(num_simulaciones):
@@ -2116,7 +2114,7 @@ def main():
 
         try:
             confort = ProblemaConfortTermico.crear(
-                ruido_observacion=0.05,
+                ruido_observacion=0.15,
                 pmv_deseado=pmv_objetivo
             )
             logging.info(f"[DEBUG] Atributos disponibles en confort: {dir(confort)}")
@@ -2190,29 +2188,40 @@ def main():
             else:
                 agent._belief = confort.belief_inicial
 
-        resultados = comparar_planificadores(agent, planners, num_episodios=50)
+        resultados = comparar_planificadores(agent, planners, num_episodios=200)
 
         for nombre, datos in resultados.items():
+            resultados_acumulados[nombre].append(datos)
+
             pmvs = [pmv for pmv in datos['pmv'] if pmv is not None and np.isfinite(pmv)]
-            resultados_acumulados[nombre].extend(pmvs)
             media = np.mean(pmvs)
             desviacion = np.std(pmvs)
             en_confort = sum(abs(pmv) < 0.5 for pmv in pmvs)
             logging.info(f"[RESUMEN] {nombre}: PMV promedio={media:.2f}, desviación={desviacion:.2f}, en zona de confort={en_confort}/{len(pmvs)}")
 
-    for nombre, pmvs_raw in resultados_acumulados.items():
-        pmvs = [pmv for pmv in pmvs_raw if pmv is not None and np.isfinite(pmv)]
+            # 🎨 Graficar PMV por simulación individual
+            if pmvs:
+                plt.plot(range(len(pmvs)), pmvs, alpha=0.6, label=f"{nombre} sim#{sim+1}")
 
-        if not pmvs:
+    for nombre, simulaciones in resultados_acumulados.items():
+        todos_pmvs = [pmv for datos in simulaciones for pmv in datos['pmv'] if pmv is not None and np.isfinite(pmv)]
+
+        if not todos_pmvs:
             logging.warning(f"[RESUMEN GLOBAL] {nombre}: No hay PMV válidos para calcular estadísticas.")
             continue
 
-        media = np.mean(pmvs)
-        desviacion = np.std(pmvs)
-        en_confort = sum(abs(pmv) < 0.5 for pmv in pmvs)
-        logging.info(f"[RESUMEN GLOBAL] {nombre}: PMV promedio={media:.2f}, desviación={desviacion:.2f}, en zona de confort={en_confort}/{len(pmvs)}")
+        media = np.mean(todos_pmvs)
+        desviacion = np.std(todos_pmvs)
+        en_confort = sum(abs(pmv) < 0.5 for pmv in todos_pmvs)
+        logging.info(f"[RESUMEN GLOBAL] {nombre}: PMV promedio={media:.2f}, desviación={desviacion:.2f}, en zona de confort={en_confort}/{len(todos_pmvs)}")
 
-    graficar_resultados(resultados_acumulados)
+    plt.title("Curvas de PMV por simulación")
+    plt.xlabel("Paso de tiempo")
+    plt.ylabel("PMV")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
     logging.info("[INFO] Simulaciones finalizadas con éxito.")
 
 if __name__ == "__main__":
